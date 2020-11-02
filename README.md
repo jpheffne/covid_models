@@ -1,7 +1,7 @@
 # covid_models
 Behavioral data and analysis script for "Psychological determinants of emotional distress during the COVID-19 pandemic"
 
-The manuscript has been published [to add]
+The manuscript has a preprint on [PsyArXiv](10.31234/osf.io/ah7jq).
 
 # Setup
 Clone repository or simply download in a zip file. 
