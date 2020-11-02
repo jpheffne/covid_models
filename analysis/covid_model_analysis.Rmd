@@ -1,0 +1,263 @@
+---
+title: "Covid Model Analysis"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: default
+  pdf_document: defaultwe
+  word_document: default
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+# Knitr options
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+# Libraries
+library(here)         # relative path
+library(conflicted)   # resolve conflicts
+library(tidyverse)    # tidy functions
+library(knitr)        # knit functions
+library(broom.mixed)  # tidy()
+library(kableExtra)   # extra markdown functions
+library(ggrepel)      # geom_text_repel
+library(psych)        # alpha(), omega()
+library(caret)        # train-test functions
+
+# Resolve conflicts
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+```
+
+# Data
+
+```{r read_data}
+# Relative paths
+dir_parent <- here()
+dir_data <- str_c(dir_parent, "/data")
+dir_graphs <- str_c(dir_parent, "/graphs")
+
+# Data
+df_models <- read_csv(str_c(dir_data, "/covid_models_data.csv"))
+df_emo_distress <- read_csv(str_c(dir_data, "/covid_emo_distress.csv")) %>% select(-X1)
+```
+
+# Stepwise CV model 
+
+## Fit model
+
+```{r fit_model}
+#### Test-train split
+set.seed(123)
+
+index_train <- as.numeric(caret::createDataPartition(y = df_models$covid_emo_distress_s, p = 0.75, list = FALSE, times = 1))
+df_train_raw <- df_models[index_train, ]
+df_test_raw <- df_models[-index_train, ]
+
+#### Stepwise lm 
+df_train_lm <- df_train_raw
+df_test_lm <- df_test_raw
+
+numCores <- parallel::detectCores() - 1 # never want to use all cores 
+cl <- parallel::makeCluster(numCores, type = "SOCK")
+doSNOW::registerDoSNOW(cl) # register cluster so caret knows to train in parallel
+
+train_control <- trainControl(method = "cv", number = 10)
+lm_fit <- train(covid_emo_distress_s ~ ., 
+                data = df_train_lm, 
+                method = "lmStepAIC", 
+                trControl = train_control, trace = FALSE, # prevent output
+                direction = "both") # forward and backward
+parallel::stopCluster(cl) # stop cluster after training
+```
+
+## Test model
+
+```{r test_model}
+#### Test model
+df_test_lm$model_fits <- predict(lm_fit, newdata = df_test_lm)
+df_test_results <- postResample(pred = df_test_lm$model_fits, obs = df_test_lm$covid_emo_distress_s)
+cor_value <- cor(df_test_lm$model_fits, df_test_lm$covid_emo_distress_s)
+var_value <- cor_value^2
+
+df_test_plot <- ggplot(df_test_lm, aes(x = model_fits, y = covid_emo_distress_s)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) + 
+  scale_y_continuous(name = "Real COVID-19\nEmotion Distress", limits = c(-2.2, 2.4)) + 
+  scale_x_continuous(name = "Predicted COVID-19\nEmotion Distress", limits = c(-2.2, 2.4)) + 
+  coord_fixed() + 
+  geom_hline(aes(yintercept = 0), linetype = "dashed") + 
+  geom_vline(aes(xintercept = 0), linetype = "dashed") + 
+  annotate(geom="text", y = 0.2, x = 1.75, label = str_c("r=", round(cor_value, 2)), color = "blue", hjust = 0) + 
+  annotate(geom="text", y = 0.4, x = 1.75, label = str_c("r2=", round(var_value, 2)), color = "red", hjust = 0) + 
+  theme_classic()
+df_test_plot
+ggsave(filename = str_c(dir_graphs, "/fig2a.pdf"), plot = df_test_plot, width = 4, height = 4)
+
+#### Refit on entire data set
+best_model <- as.character(lm_fit$finalModel$call[2]) %>% str_replace(., ".outcome", "covid_emo_distress_s")
+final_model <- lm(formula = as.formula(best_model), data = df_models)
+final_summary <- summary(final_model)
+
+final_results <- as.data.frame(final_summary$coefficients) %>%
+  tibble::rownames_to_column(var = "coefficient") %>%
+  mutate(p_values = case_when(`Pr(>|t|)` <= .001 ~ "***", 
+                              `Pr(>|t|)` <= .01 ~ "**", 
+                              `Pr(>|t|)` <= .05 ~ "*", 
+                              `Pr(>|t|)` > .05 ~ "n.s.")) %>%
+  filter(coefficient != "(Intercept)")
+
+final_betas <- ggplot(final_results, aes(x = reorder(coefficient, -abs(Estimate)), y = Estimate)) + 
+  geom_bar(stat = "identity", position = position_dodge(.9), fill = "white", color = "black") + 
+  geom_errorbar(aes(ymin = Estimate - `Std. Error`, ymax = Estimate + `Std. Error`), width = 0) + 
+  geom_text(aes(label = p_values, y = Estimate + .1)) +
+  xlab("Coefficient Names") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1))
+final_betas
+ggsave(filename = str_c(dir_graphs, "/fig2b.pdf"), plot = final_betas, width = 7, height = 4)
+```
+
+## Random forest
+
+```{r random_forest}
+## RF specific 
+df_train_rf <- df_train_raw
+df_test_rf <- df_test_raw
+
+numCores <- parallel::detectCores() - 1 
+cl <- parallel::makeCluster(numCores, type = "SOCK")
+doSNOW::registerDoSNOW(cl) 
+
+train_control <- trainControl(method = "cv", number = 10)
+forest_fit <- train(covid_emo_distress_s ~ ., 
+                data = df_train_rf, 
+                method = "ranger", 
+                trControl = train_control, 
+                importance = "impurity")
+parallel::stopCluster(cl) 
+
+## Test correlation 
+df_test_rf$model_fits <- predict(forest_fit, newdata = df_test_rf)
+df_test_results_rf <- postResample(pred = df_test_rf$model_fits, obs = df_test_rf$covid_emo_distress_s)
+cor_rf <- cor(df_test_rf$model_fits, df_test_rf$covid_emo_distress_s)
+```
+
+## Lasso
+
+```{r lasso}
+## Lasso specific
+df_train_ls <- df_train_raw
+df_test_ls <- df_test_raw
+
+numCores <- parallel::detectCores() - 1 
+cl <- parallel::makeCluster(numCores, type = "SOCK")
+doSNOW::registerDoSNOW(cl) 
+
+train_control <- trainControl(method = "cv", number = 10)
+tune_control <- expand.grid(alpha = 1, lambda = 10^seq(-3, 3, length = 100))
+lasso_fit <- train(covid_emo_distress_s ~ ., 
+                data = df_train_ls, 
+                method = "glmnet", 
+                trControl = train_control,
+                tuneGrid = tune_control)
+parallel::stopCluster(cl)
+
+## Test correlation 
+df_test_ls$model_fits <- predict(lasso_fit, newdata = df_test_ls)
+df_test_results_ls <- postResample(pred = df_test_ls$model_fits, obs = df_test_ls$covid_emo_distress_s)
+cor_ls <- cor(df_test_ls$model_fits, df_test_ls$covid_emo_distress_s)
+```
+
+# Simple correlations
+
+```{r simple_cor}
+# Final model is cv
+df_cv <- tidy(final_model, conf.int = TRUE) %>%
+  mutate(p.labels = case_when(p.value <= .001 ~ "***", 
+                              p.value <= .01 ~ "**", 
+                              p.value <= .05 ~ "*", 
+                              p.value > .05 ~ "n.s."))
+
+# Simple relationships
+df_simples <- df_models %>%
+  pivot_longer(cols = -covid_emo_distress_s, names_to = "term", values_to = "value") %>% 
+  group_by(term) %>% 
+  do(tidy(cor.test(.$covid_emo_distress_s, .$value))) %>%
+  select(term:conf.high) %>%
+  mutate(p.labels = case_when(p.value <= .001 ~ "***", 
+                              p.value <= .01 ~ "**", 
+                              p.value <= .05 ~ "*", 
+                              p.value > .05 ~ "n.s."))
+
+# Full
+df_models <- df_cv %>%
+  filter(term != "(Intercept)") %>%
+  full_join(., df_simples, by = "term", suffix = c("_cross_valid", "_simple")) %>%
+  mutate(grouping = case_when(term == "gad_total_s" ~ "mental_health", 
+                              term == "ius_total_s" ~ "personality", 
+                              term == "covid_media_usa_s" ~ "media", 
+                              term == "covid_media_facebook_s" ~ "media", 
+                              term == "covid_media_int_s" ~ "media", 
+                              term == "covid_media_usa_s" ~ "media", 
+                              term == "covid_media_twitter_s" ~ "media", 
+                              term == "covid_media_tv_s" ~ "media", 
+                              term == "tas_total_s" ~ "mental_health", 
+                              term == "irq_total_s" ~ "emotion_regulation", 
+                              term == "covid_behave1_s" ~ "covid_measure", 
+                              term == "covid_knowledge_s" ~ "covid_measure", 
+                              term == "bfi_extraversion_s" ~ "personality", 
+                              term == "gender" ~ "demographic", 
+                              term == "age_s" ~ "demographic", 
+                              term == "liberalism_s" ~ "demographic", 
+                              term == "delta_social_s" ~ "social"), 
+         error = case_when(((estimate_cross_valid < estimate_simple) & estimate_cross_valid > 0) ~ "over_estimate", 
+                           ((estimate_cross_valid > estimate_simple) & estimate_cross_valid < 0) ~ "over_estimate", 
+                           ((estimate_cross_valid < estimate_simple) & estimate_cross_valid < 0) ~ "under_estimate", 
+                           ((estimate_cross_valid > estimate_simple) & estimate_cross_valid > 0) ~ "under_estimate"))
+
+# Comparison
+df_compare <- df_models %>% filter(!is.na(grouping))
+
+model_compare <- ggplot(df_compare, aes(x = estimate_cross_valid, y = estimate_simple)) + 
+  geom_segment(aes(x = estimate_cross_valid, y = estimate_simple, xend = estimate_cross_valid, yend = estimate_cross_valid, linetype = error)) + 
+  geom_point(aes(color = grouping)) + 
+  #ggrepel::geom_label_repel(aes(label = term), size = 2) + 
+  geom_abline(slope = 1, intercept = 0, linetype = 2) + 
+  scale_x_continuous(name = "CV Estimates", limits = c(-.2, 0.7), breaks = seq(-.2, .7, .1)) + 
+  scale_y_continuous(name = "Simple Estimates", limits = c(-.2, 0.7), breaks = seq(-.2, .7, .1)) + 
+  coord_fixed() + 
+  theme_classic() + 
+  theme(text = element_text(size = 12))
+model_compare
+ggsave(filename = str_c(dir_graphs, "/fig1b.pdf"), plot = model_compare, width = 5, height = 4)
+```
+  
+# Covid Emotion Distress Reliabilty
+
+```{r reliability}
+# Alpha
+alpha_emo <- psych::alpha(df_emo_distress, keys = c("covid_emo_distress_1_2", "covid_emo_distress_2_6")) # keys are reverse coded items
+#alpha_emo$total$raw_alpha
+
+# Omega (ERF)
+emo_r_matrix <- cor(df_emo_distress)
+omega_emo <- omega(emo_r_matrix)  # bifactor factor solution 
+#omegaSem(m = emo_r_matrix, n.obs = 948)
+
+## Plot
+#pdf(file = str_c(dir_graphs, "omega_plot.pdf"))
+#omega(emo_r_matrix)
+#dev.off()
+```
+
+# Session Info
+```{r session_info}
+sessionInfo()
+```
+
+# Appendix
+Code used for all figures and analyses. 
+
+```{r ref.label=knitr::all_labels(), echo = T, eval = F}
+```
