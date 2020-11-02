@@ -30,6 +30,11 @@ conflict_prefer("filter", "dplyr")
 ```
 
 # Data
+There are two data files: `covid_models_data` which holds all variables used in the cross-validated model of emotional distress and `covid_emo-distress` which holds the item-level responses for the emotional distress scale. The supplement of the manuscript holds more detailed information about all of the questionnaires included. 
+
+## Covid models data
+
+## Covid emotion distress data
 
 ```{r read_data}
 # Relative paths
