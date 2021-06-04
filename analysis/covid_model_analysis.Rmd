@@ -22,7 +22,7 @@ To install these packages simply use the `install.packages()` function and put e
 
 # Covid Models
 
-The order of this Markdown will follow the order of results in the manuscript which is published in the journal of Humanities & Social Sciences Communication at the following [DOI TO ADD ONCE PUBLISHED]().
+The order of this Markdown will follow the order of results in the manuscript which is published in the journal of Humanities & Social Sciences Communication at the following [DOI: TO ADD ONCE PUBLISHED]().
 
 ```{r setup, include=FALSE}
 # Knitr options
