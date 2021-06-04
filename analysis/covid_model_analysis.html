@@ -362,7 +362,7 @@ summary {
 
 
 <h1 class="title toc-ignore">Covid Model Analysis</h1>
-<h4 class="date">02 November, 2020</h4>
+<h4 class="date">12 November, 2020</h4>
 
 </div>
 
@@ -372,6 +372,13 @@ summary {
 </div>
 <div id="data" class="section level1">
 <h1>Data</h1>
+<p>There are two data files: <code>covid_models_data</code> which holds all variables used in the cross-validated model of emotional distress and <code>covid_emo-distress</code> which holds the item-level responses for the emotional distress scale. The supplement of the manuscript holds more detailed information about all of the questionnaires included.</p>
+<div id="covid-models-data" class="section level2">
+<h2>Covid models data</h2>
+</div>
+<div id="covid-emotion-distress-data" class="section level2">
+<h2>Covid emotion distress data</h2>
+</div>
 </div>
 <div id="stepwise-cv-model" class="section level1">
 <h1>Stepwise CV model</h1>
@@ -507,6 +514,10 @@ df_test_lm$model_fits &lt;- predict(lm_fit, newdata = df_test_lm)
 df_test_results &lt;- postResample(pred = df_test_lm$model_fits, obs = df_test_lm$covid_emo_distress_s)
 cor_value &lt;- cor(df_test_lm$model_fits, df_test_lm$covid_emo_distress_s)
 var_value &lt;- cor_value^2
+
+#### Calibration check 
+m1 &lt;- lm(covid_emo_distress_s ~ model_fits, data = df_test_lm)
+#summary(m1)
 
 df_test_plot &lt;- ggplot(df_test_lm, aes(x = model_fits, y = covid_emo_distress_s)) + 
   geom_point() + 

@@ -85,6 +85,10 @@ df_test_results <- postResample(pred = df_test_lm$model_fits, obs = df_test_lm$c
 cor_value <- cor(df_test_lm$model_fits, df_test_lm$covid_emo_distress_s)
 var_value <- cor_value^2
 
+#### Calibration check 
+m1 <- lm(covid_emo_distress_s ~ model_fits, data = df_test_lm)
+#summary(m1)
+
 df_test_plot <- ggplot(df_test_lm, aes(x = model_fits, y = covid_emo_distress_s)) + 
   geom_point() + 
   geom_smooth(method = "lm", se = F) + 
