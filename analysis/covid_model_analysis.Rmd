@@ -1,17 +1,35 @@
 ---
 title: "Covid Model Analysis"
+author: "Joseph Heffner"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
-  html_document: default
-  pdf_document: defaultwe
+  html_document:
+    toc: true
+    toc_float: true
   word_document: default
+  pdf_document: default
 ---
 
 # Setup
 
+To run this analysis script you'll have to have the following packages installed (make sure `tidyverse` is updated): 
+
+`here`, `conflicted`, `tidyverse`, `knitr`, `broom.mixed`, `kableExtra`, `ggrepel`, `psych`, `caret`, `corrplot`, `tableone`, `sjPlot`, `papaja`, `corrr`, `ggraph`, `igraph`
+
+To install these packages simply use the `install.packages()` function and put each package name in as a character. 
+
+**Note**: If you've already used the `here()` function in another script, you will have to open a new instance of R to ensure the relative pathing works for this script (or manually change the pathing). 
+
+# Covid Models
+
+The order of this Markdown will follow the order of results in the manuscript which is published in the journal of Humanities & Social Sciences Communication at the following [DOI TO ADD ONCE PUBLISHED]().
+
 ```{r setup, include=FALSE}
 # Knitr options
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+reg_ouput <- FALSE    # set to TRUE if want to knit document with regression table output
+cor_output <- FALSE   # knitting will not work with these graphs     
 
 # Libraries
 library(here)         # relative path
@@ -23,6 +41,14 @@ library(kableExtra)   # extra markdown functions
 library(ggrepel)      # geom_text_repel
 library(psych)        # alpha(), omega()
 library(caret)        # train-test functions
+library(corrplot)     # correlation plot
+library(tableone)     # tables
+library(sjPlot)       # regression tables
+library(papaja)       # apa regression tables, requires an install from github
+library(corrr)        # correlations
+library(ggraph)       # graph visualizations
+library(igraph)       # graph visualizations
+
 
 # Resolve conflicts
 conflict_prefer("select", "dplyr")
@@ -30,11 +56,8 @@ conflict_prefer("filter", "dplyr")
 ```
 
 # Data
-There are two data files: `covid_models_data` which holds all variables used in the cross-validated model of emotional distress and `covid_emo-distress` which holds the item-level responses for the emotional distress scale. The supplement of the manuscript holds more detailed information about all of the questionnaires included. 
 
-## Covid models data
-
-## Covid emotion distress data
+There are two data files: `covid_models_data` which holds all variables used in the cross-validated model of emotional distress and `covid_emo_distress` which holds the item-level responses for the emotional distress scale. See manuscript and supplement for more detailed information about all the questionnaires included. 
 
 ```{r read_data}
 # Relative paths
@@ -43,13 +66,48 @@ dir_data <- str_c(dir_parent, "/data")
 dir_graphs <- str_c(dir_parent, "/graphs")
 
 # Data
-df_models <- read_csv(str_c(dir_data, "/covid_models_data.csv"))
-df_emo_distress <- read_csv(str_c(dir_data, "/covid_emo_distress.csv")) %>% select(-X1)
+df_models <- read_csv(str_c(dir_data, "/covid_models_data.csv")) %>% select(-sub) 
+df_emo_distress <- read_csv(str_c(dir_data, "/covid_emo_distress.csv")) %>% select(-sub)
 ```
+
+## Covid models data
+
+Below you can see a snippet of the data where the columns refer to: (if you want subject numbers you can keep them in the previous code chunk but they need to be removed for the modeling). 
+
+```{r}
+df_models %>% head() %>% 
+  kable() %>%
+  kable_styling()
+```
+
+**Note** All variables have been scaled and have a subscript (`_s`) which indicates this. 
+
+- `erq_cog_reap_s`: cognitive reappraisal subscale of the emotion regulation questionnaire 
+- `erq_exp_supp_s`: expressive suppression subscale of the emotion regulation questionnaire 
+- `income_s`: ordinal income (see Supplement for scale)
+- `tas_total_s`: total score for the toronto-20 alexithymia scale
+- `cesd_total_s` total score for the center for epidemiological studies depression scale
+- `gad_total_s`: total score for generalized anxiety disorder (7-item) scale
+- `irq_total_s`: interpersonal regulation questionnaire total scale
+- `bfi_extraversion_s`: extraversion subscale of the big five inventory scale 
+- `bif_neuroticism_s`: neuroticism subscale of the big five inventory scale
+- `ius_total_s`: intolerance of uncertainty scale
+- `liberalism_s`: political ideology identification item
+- `age_s`: subject age
+- `covid_knowledge_s`: score from quiz about covid knowledge at the time of data collection (see Supplement) 
+- `covid_estimate_log_s`: log-scaled estimate of current covid cases in the US at the time of data collection 
+- `covid_behave1_s`: covid behaviors scale 1 (see Supplement)
+- `covid_behave2_s`: covid behaviors scale 2 (see Supplement)
+- `covid_media_`: media consumption about covid on relevant platform (`_facebook`, `_youtube`, `_twitter`, `_other`, `_govt`, `_online`, `_tv`, `_usa` [usa specific news], `_int`, [international specific news]) 
+- `gender`: 0 - male, 1 - female
+
+## Covid emotion distress data
+
+See Supplement for corresponding item-level questions. 
 
 # Stepwise CV model 
 
-## Fit model
+## Train model
 
 ```{r fit_model}
 #### Test-train split
@@ -84,6 +142,10 @@ df_test_lm$model_fits <- predict(lm_fit, newdata = df_test_lm)
 df_test_results <- postResample(pred = df_test_lm$model_fits, obs = df_test_lm$covid_emo_distress_s)
 cor_value <- cor(df_test_lm$model_fits, df_test_lm$covid_emo_distress_s)
 var_value <- cor_value^2
+
+#### Calibration check 
+m1 <- lm(covid_emo_distress_s ~ model_fits, data = df_test_lm)
+#summary(m1)
 
 df_test_plot <- ggplot(df_test_lm, aes(x = model_fits, y = covid_emo_distress_s)) + 
   geom_point() + 
@@ -121,6 +183,31 @@ final_betas <- ggplot(final_results, aes(x = reorder(coefficient, -abs(Estimate)
   theme(axis.text.x = element_text(angle = 45, hjust= 1))
 final_betas
 ggsave(filename = str_c(dir_graphs, "/fig2b.pdf"), plot = final_betas, width = 7, height = 4)
+
+#### Export regression results
+if (reg_ouput == TRUE) {
+  
+  # sjPlot
+  tab_model(final_model, 
+            pred.labels = c("Intercept", "Alexithymia", "Anxiety", "Interpersonal (IRQ)", 
+                            "Extraversion", "IUS", "Liberalism", "Age", "Covid Knowledge", 
+                            "Covid Behavior", "Covid Media: Facebook", "Covid Media: Twitter", 
+                            "Covid Media: TV", "Covid Media: USA", "Covid Media: International", "Gender", "Social Events"),
+            dv.labels = c("Estimates"), string.se = "SE", string.stat = "t",
+            show.se = TRUE, show.stat = TRUE, show.ci = FALSE, 
+            show.re.var = FALSE, show.aic = FALSE,
+            show.r2 = FALSE, show.icc = FALSE, show.obs = TRUE,
+            CSS = css_theme("regression"), file = str_c(dir_graphs, "/table2.html"))
+  
+  # Papaja
+  apa_lm <- papaja::apa_print(final_model) 
+  apa_lm$table$predictor <- c("Intercept", "Alexithymia", "Anxiety", "Interpersonal (IRQ)", 
+                              "Extraversion", "IUS", "Liberalism", "Age", "Covid Knowledge", 
+                              "Covid Behavior", "Covid Media: Facebook", "Covid Media: Twitter", 
+                              "Covid Media: TV", "Covid Media: USA", "Covid Media: International", "Gender", "Social Events")
+  papaja::apa_table(apa_lm$table, 
+                    caption = "Cross-validated regression model")
+}
 ```
 
 ## Random forest
@@ -196,7 +283,7 @@ df_simples <- df_models %>%
                               p.value > .05 ~ "n.s."))
 
 # Full
-df_models <- df_cv %>%
+df_cv_full <- df_cv %>%
   filter(term != "(Intercept)") %>%
   full_join(., df_simples, by = "term", suffix = c("_cross_valid", "_simple")) %>%
   mutate(grouping = case_when(term == "gad_total_s" ~ "mental_health", 
@@ -204,7 +291,6 @@ df_models <- df_cv %>%
                               term == "covid_media_usa_s" ~ "media", 
                               term == "covid_media_facebook_s" ~ "media", 
                               term == "covid_media_int_s" ~ "media", 
-                              term == "covid_media_usa_s" ~ "media", 
                               term == "covid_media_twitter_s" ~ "media", 
                               term == "covid_media_tv_s" ~ "media", 
                               term == "tas_total_s" ~ "mental_health", 
@@ -222,7 +308,7 @@ df_models <- df_cv %>%
                            ((estimate_cross_valid > estimate_simple) & estimate_cross_valid > 0) ~ "under_estimate"))
 
 # Comparison
-df_compare <- df_models %>% filter(!is.na(grouping))
+df_compare <- df_cv_full %>% filter(!is.na(grouping))
 
 model_compare <- ggplot(df_compare, aes(x = estimate_cross_valid, y = estimate_simple)) + 
   geom_segment(aes(x = estimate_cross_valid, y = estimate_simple, xend = estimate_cross_valid, yend = estimate_cross_valid, linetype = error)) + 
@@ -236,9 +322,78 @@ model_compare <- ggplot(df_compare, aes(x = estimate_cross_valid, y = estimate_s
   theme(text = element_text(size = 12))
 model_compare
 ggsave(filename = str_c(dir_graphs, "/fig1b.pdf"), plot = model_compare, width = 5, height = 4)
+
+if (cor_output == TRUE) {
+  ## Correlation plot
+  final_variables <- as.data.frame(final_summary$coefficients) %>%
+    tibble::rownames_to_column(var = "coefficient") %>%
+    filter(coefficient != "(Intercept)") %>%
+    pull(coefficient)
+  
+  cor_data <- cor(df_models %>% select(all_of(final_variables)), use = "na.or.complete")         # correlation of all variables 
+  res1 <- cor.mtest(df_models %>% select(all_of(final_variables)), conf.level = .95)             # significance.
+  
+  ## Correlation network
+  cor_df <- df_models %>% 
+    select(all_of(final_variables), covid_emo_distress_s) %>% 
+    correlate() %>%
+    stretch() %>%
+    mutate(x = case_when(x == "gad_total_s" ~ "Anxiety", 
+                         x == "ius_total_s" ~ "IUS", 
+                         x == "covid_media_usa_s" ~ "Media: USA", 
+                         x == "covid_media_facebook_s" ~ "Media: Facebook", 
+                         x == "covid_media_int_s" ~ "Media: International", 
+                         x == "covid_media_twitter_s" ~ "Media: Twitter", 
+                         x == "covid_media_tv_s" ~ "Media: TV", 
+                         x == "tas_total_s" ~ "Alexithymia", 
+                         x == "irq_total_s" ~ "Interpersonal (IRQ)", 
+                         x == "covid_behave1_s" ~ "Covid Behavior", 
+                         x == "covid_knowledge_s" ~ "Covid Knowledge", 
+                         x == "bfi_extraversion_s" ~ "Extraversion", 
+                         x == "gender" ~ "Gender", 
+                         x == "age_s" ~ "Age", 
+                         x == "liberalism_s" ~ "Liberalism", 
+                         x == "social_events_s" ~ "Social Events", 
+                         x == "covid_emo_distress_s" ~ "Covid Emotional Distress"), 
+           y = case_when(y == "gad_total_s" ~ "Anxiety", 
+                         y == "ius_total_s" ~ "IUS", 
+                         y == "covid_media_usa_s" ~ "Media: USA", 
+                         y == "covid_media_facebook_s" ~ "Media: Facebook", 
+                         y == "covid_media_int_s" ~ "Media: International", 
+                         y == "covid_media_twitter_s" ~ "Media: Twitter", 
+                         y == "covid_media_tv_s" ~ "Media: TV", 
+                         y == "tas_total_s" ~ "Alexithymia", 
+                         y == "irq_total_s" ~ "Interpersonal (IRQ)", 
+                         y == "covid_behave1_s" ~ "Covid Behavior", 
+                         y == "covid_knowledge_s" ~ "Covid Knowledge", 
+                         y == "bfi_extraversion_s" ~ "Extraversion", 
+                         y == "gender" ~ "Gender", 
+                         y == "age_s" ~ "Age", 
+                         y == "liberalism_s" ~ "Liberalism", 
+                         y == "social_events_s" ~ "Social Events", 
+                         y == "covid_emo_distress_s" ~ "Covid Emotional Distress"))
+  
+  fig3_data <- cor_df %>%
+    filter(abs(r) > .2) %>%
+    graph_from_data_frame(directed = FALSE)
+  
+  fig3_plot <- ggraph(fig3_data) +
+    geom_edge_link(aes(color = r)) +
+    guides(edge_alpha = "none", edge_width = "none") +
+    scale_edge_colour_gradientn(limits = c(-1, 1), colors = c("firebrick2", "dodgerblue2")) +
+    geom_node_point(size = 3) +
+    geom_node_text(aes(label = name), repel = TRUE) +
+    theme_graph(base_family = 'Helvetica')
+  fig3_plot
+    
+  ggsave(filename = str_c(dir_graphs, "/fig3.pdf"), plot = fig3_plot, width = 6, height = 4)
+  ggsave(filename = str_c(dir_graphs, "/fig3.png"), plot = fig3_plot, width = 6.666, height = 5)
+}
 ```
   
 # Covid Emotion Distress Reliabilty
+
+Code below investigates reliability of the covid emotion distress scale but the results are not printed to the Markdown. 
 
 ```{r reliability}
 # Alpha
@@ -257,6 +412,7 @@ omega_emo <- omega(emo_r_matrix)  # bifactor factor solution
 ```
 
 # Session Info
+
 ```{r session_info}
 sessionInfo()
 ```

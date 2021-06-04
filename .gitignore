@@ -1,4 +1,7 @@
-# Manuscript (see preprint link in README)
+# Manuscript (see MS link in README)
 manuscript/
 graphs/final/
 presentations/
+data/raw/
+data/demographics.csv
+analysis/covid_model_demo.Rmd
