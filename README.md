@@ -1,7 +1,7 @@
 # covid_models
-Behavioral data and analysis script for "Psychological determinants of emotional distress during the COVID-19 pandemic"
+Behavioral data and analysis script for "Anxiety, gender, and social media consumption predict COVID-19 emotional distress"
 
-The manuscript has a preprint on [PsyArXiv](10.31234/osf.io/ah7jq).
+The manuscript has been published in [Humanities & Social Sciences Communications](https://www.nature.com/articles/s41599-021-00816-8). 
 
 # Setup
 Clone repository or simply download in a zip file. 
